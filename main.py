@@ -165,6 +165,83 @@ QA output: {qa_output}"""}
     )
     return response.content[0].text
 
+def run_assumption_map(spec: str) -> str:
+    response = client.messages.create(
+        model="claude-sonnet-4-5",
+        max_tokens=3000,
+        system="""You are a product strategist reviewing a feature spec.
+Your job is to extract every assumption baked into this spec — stated or unstated — 
+and assess each one honestly.
+
+An assumption is anything that has to be true for this feature to succeed.
+Look for assumptions about: user behaviour, technical feasibility, business value,
+data availability, team capability, and market conditions.
+
+For each assumption assess:
+- Criticality: how bad is it if this assumption is wrong? (High/Medium/Low)
+- Evidence: how much evidence exists that this is true? (High/Medium/Low)
+- Validation method: the cheapest, fastest way to test this assumption
+
+Prioritise by: High criticality + Low evidence first — these are the ones that 
+must be validated before building starts.
+
+Respond in this exact JSON format:
+{
+  "assumptions": [
+    {
+      "assumption": "what has to be true",
+      "why_it_matters": "impact if wrong",
+      "criticality": "High | Medium | Low",
+      "evidence": "High | Medium | Low",
+      "validation_method": "cheapest way to test this"
+    }
+  ],
+  "top_priority": "the single most important assumption to validate first and why"
+}
+
+Return only the JSON. No preamble, no explanation.""",
+        messages=[
+            {"role": "user", "content": f"Spec:\n\n{spec}"}
+        ]
+    )
+    return response.content[0].text
+
+
+def run_risk_log(spec: str) -> str:
+    response = client.messages.create(
+        model="claude-sonnet-4-5",
+        max_tokens=3000,
+        system="""You are a delivery manager reviewing a feature spec.
+Your job is to produce a risk log — every risk that could cause this feature 
+to fail, be delayed, or cause harm if it shipped.
+
+Consider: technical risks, dependency risks, scope risks, user adoption risks,
+compliance risks, and operational risks.
+
+For each risk assess likelihood and impact honestly. Do not default to Medium 
+for everything — be specific about why something is High or Low.
+
+Respond in this exact JSON format:
+{
+  "risks": [
+    {
+      "risk": "what could go wrong",
+      "likelihood": "High | Medium | Low",
+      "impact": "High | Medium | Low",
+      "mitigation": "specific action to reduce this risk",
+      "owner": ""
+    }
+  ],
+  "top_priority": "the single highest priority risk and why it must be addressed first"
+}
+
+Return only the JSON. No preamble, no explanation.""",
+        messages=[
+            {"role": "user", "content": f"Spec:\n\n{spec}"}
+        ]
+    )
+    return response.content[0].text
+
 if __name__ == "__main__":
     feature = "Add a dark mode toggle"
     
@@ -187,3 +264,13 @@ if __name__ == "__main__":
     final_raw = run_synthesis_agent(feature, pm_raw, eng_raw, qa_raw)
     final_spec = parse_agent_output(final_raw)
     print(json.dumps(final_spec, indent=2))
+
+    print("\n--- ASSUMPTION MAP ---")
+    assumption_raw = run_assumption_map(final_raw)
+    assumption_result = parse_agent_output(assumption_raw)
+    print(json.dumps(assumption_result, indent=2))
+
+    print("\n--- RISK LOG ---")
+    risk_raw = run_risk_log(final_raw)
+    risk_result = parse_agent_output(risk_raw)
+    print(json.dumps(risk_result, indent=2))
