@@ -16,7 +16,7 @@ def parse_agent_output(raw: str) -> dict:
 def run_pm_agent(feature_brief: str) -> str:
     response = client.messages.create(
         model="claude-sonnet-4-5",
-        max_tokens=1000,
+        max_tokens=2000,
         system="""You are an experienced Product Manager reviewing a feature brief.
 You have been burned before by shipping features that failed because assumptions 
 were never challenged. You are optimistic about user value but ruthless about 
@@ -35,6 +35,12 @@ What do I not know about the user that I should know before building this?
 
 Respond in this exact JSON format:
 {
+  "input_type": "epic | feature | user_story",
+  "epic_breakdown": {
+    "explanation": "why this is an epic, not a feature",
+    "candidate_features": ["feature 1", "feature 2", "feature 3"],
+    "recommended_first": "which feature to spec first and why"
+  },
   "user_story": "As a [who], I want [what], so that [why].",
   "scope": ["what is included"],
   "out_of_scope": ["what is explicitly excluded"],
@@ -43,9 +49,62 @@ Respond in this exact JSON format:
   "simpler_version": "what is the smallest version that tests the core assumption?",
   "questions": ["open questions you still have"]
 }
+
+Note: if input_type is epic, only populate input_type and epic_breakdown.
+If input_type is feature or user_story, populate all other fields and set epic_breakdown to null.
+Important: classify as epic ONLY if the input describes multiple distinct features. 
+A single feature that is complex or controversial is still a feature, not an epic.
+
 Return only the JSON. No preamble, no explanation.""",
         messages=[
             {"role": "user", "content": f"Feature brief: {feature_brief}"}
+        ]
+    )
+    return response.content[0].text
+
+
+def run_context_builder(answers: dict) -> str:
+    response = client.messages.create(
+        model="claude-sonnet-4-5",
+        max_tokens=2000,
+        system="""You are a product analyst synthesising context about a product 
+from a PM's answers to four questions. 
+
+Your job is to produce a concise, structured context block that will help 
+PM, Engineer, and QA agents produce more specific and useful output.
+
+Be specific. Do not pad. If an answer is vague, note it as unknown.
+
+Respond in this exact JSON format:
+{
+  "users": "who the primary users are and what job they're doing",
+  "product": "what the product already does and what this feature fits alongside",
+  "constraints": "tech stack, team, time, or other constraints",
+  "failure_condition": "what would make this feature a failure",
+  "context_summary": "2-3 sentence summary to prepend to agent prompts"
+}
+
+Return only the JSON. No preamble, no explanation.""",
+        messages=[
+            {"role": "user", "content": f"""
+Q1 - Who are your primary users and what job are they trying to do?
+A: {answers.get('users', 'Not provided')}
+
+Q2 - Briefly describe your product and its main features.
+A: {answers.get('product', 'Not provided')}
+
+Q3 - What's your tech stack or any constraints I should know about?
+A: {answers.get('constraints', 'Not provided')}
+
+Q4 - What's the one thing that would make this feature a failure?
+A: {answers.get('failure_condition', 'Not provided')}
+
+Additional context from product URL:
+{answers.get('url_context', 'None provided')}
+
+Additional context from uploaded files:
+{answers.get('file_context', 'None provided')}
+"""}
         ]
     )
     return response.content[0].text

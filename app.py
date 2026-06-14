@@ -9,6 +9,8 @@ import json
 import docx
 import importlib.util
 import os
+import requests
+from bs4 import BeautifulSoup
 
 spec_loader = importlib.util.spec_from_file_location(
     "main",
@@ -18,6 +20,7 @@ main_module = importlib.util.module_from_spec(spec_loader)
 spec_loader.loader.exec_module(main_module)
 
 run_pm_agent = main_module.run_pm_agent
+run_context_builder=main_module.run_context_builder
 run_engineer_agent = main_module.run_engineer_agent
 run_qa_agent = main_module.run_qa_agent
 run_synthesis_agent = main_module.run_synthesis_agent
@@ -26,6 +29,18 @@ run_risk_log = main_module.run_risk_log
 parse_agent_output = main_module.parse_agent_output
 
 # ── Cached agent calls ──
+@st.cache_data(show_spinner=False)
+def cached_context_builder(users: str, product: str, constraints: str, 
+                            failure: str, url_context: str = "") -> str:
+    answers = {
+        "users": users,
+        "product": product,
+        "constraints": constraints,
+        "failure_condition": failure,
+        "url_context": url_context
+    }
+    return run_context_builder(answers)
+
 @st.cache_data(show_spinner=False)
 def cached_pm_agent(feature: str) -> str:
     return run_pm_agent(feature)
@@ -50,6 +65,20 @@ def cached_assumption_map(spec: str) -> str:
 def cached_risk_log(spec: str) -> str:
     return run_risk_log(spec)
 
+@st.cache_data(show_spinner=False)
+def cached_context_builder(users: str, product: str, constraints: str, 
+                            failure: str, url_context: str = "", 
+                            file_context: str = "") -> str:
+    answers = {
+        "users": users,
+        "product": product,
+        "constraints": constraints,
+        "failure_condition": failure,
+        "url_context": url_context,
+        "file_context": file_context
+    }
+    return run_context_builder(answers)
+
 st.set_page_config(
     page_title="Three Amigos Spec Writer",
     page_icon="🤝",
@@ -64,6 +93,19 @@ st.markdown("""
 stress-test a feature together before it's built. This tool runs that conversation 
 for you in seconds — surfacing conflicts, edge cases, and open questions before 
 a line of code is written.
+
+**How it works — follow the tabs in order:**
+1. **Generate Spec** — describe your feature and optionally add product context. 
+   Download the spec when done.
+2. **Review Spec** — upload the spec from Step 1 (edit it first if you like). 
+   Engineer and QA agents add inline comments. Download the annotated spec.
+3. **PM Artefacts** — upload the annotated spec from Step 2. 
+   Generate an assumption map and risk log ready to share with your team.
+
+**Works best when:**
+- Your feature brief is specific enough to build — not a vague goal or epic
+- You add product context in Step 1 — the more the agents know about your product, the more specific the output
+- You edit the downloaded spec between steps — answer the open questions, tighten the scope, then re-upload
 """)
 
 st.divider()
@@ -78,7 +120,31 @@ def read_uploaded_file(uploaded_file) -> str:
         return "\n".join([para.text for para in doc.paragraphs if para.text.strip()])
     else:
         return uploaded_file.read().decode("utf-8")
+    
+def scrape_url(url: str) -> str:
+    try:
+        response = requests.get(url, timeout=10)
+        soup = BeautifulSoup(response.text, "html.parser")
+        for tag in soup(["script", "style", "nav", "footer", "header"]):
+            tag.decompose()
+        text = soup.get_text(separator="\n", strip=True)
+        # Take first 2000 chars — enough for context, not enough to bloat the prompt
+        return text[:2000]
+    except Exception as e:
+        return ""
 
+def extract_pdf_text(uploaded_file) -> str:
+    try:
+        import pdfplumber
+        with pdfplumber.open(uploaded_file) as pdf:
+            text = "\n".join(
+                page.extract_text() for page in pdf.pages 
+                if page.extract_text()
+            )
+        return text[:3000]
+    except Exception as e:
+        return ""
+    
 # ── Helper: build assumption map markdown ──
 def build_assumption_markdown(result: dict) -> str:
     md = "# Assumption Map\n\n"
@@ -114,22 +180,90 @@ with tab1:
         key="feature_input"
     )
 
-    context = st.text_area(
-        "Product context (optional)",
-        placeholder="e.g. B2B SaaS project management tool, React frontend, Python backend, "
-                    "primary users are project managers and developers.",
-        height=80,
-        key="context_input"
-    )
+    st.markdown("#### Product context (optional)")
+    st.markdown("Answer a few questions to help the agents give more specific output.")
+
+with st.expander("Build product context", expanded=False):
+    ctx_users = st.text_input(
+            "1. Who are your primary users and what job are they trying to do?",
+            placeholder="e.g. B2B project managers tracking team tasks across multiple clients",
+            key="ctx_users"
+        )
+    ctx_product = st.text_input(
+            "2. Briefly describe your product and its main features.",
+            placeholder="e.g. Project management tool with task tracking, time logging and client reporting",
+            key="ctx_product"
+        )
+    ctx_constraints = st.text_input(
+            "3. What's your tech stack or any constraints I should know about?",
+            placeholder="e.g. React frontend, Python/Django backend, AWS, small team of 4 engineers",
+            key="ctx_constraints"
+        )
+    ctx_failure = st.text_input(
+            "4. What's the one thing that would make this feature a failure?",
+            placeholder="e.g. If users don't discover it, or it slows down the core workflow",
+            key="ctx_failure"
+        )
+    ctx_url = st.text_input(
+            "5. Product URL (optional — we'll scrape it for additional context)",
+            placeholder="e.g. https://yourproduct.com",
+            key="ctx_url"
+        )
+
+    ctx_files = st.file_uploader(
+            "6. Upload supporting files (optional — Figma exports as PDF, existing PRDs, research docs)",
+            type=["pdf", "txt", "md"],
+            accept_multiple_files=True,
+            key="ctx_files"
+        )
+
+    # Use context summary if available, otherwise empty
+    context = st.session_state.get("context_result", {}).get("context_summary", "")
 
     assess_button = st.button("Generate Spec", type="primary",
-                              disabled=not feature, key="assess_btn")
-
+                              disabled=not feature, key="assess_btn")   
     if assess_button:
+        st.cache_data.clear()
         st.session_state.pm_raw = None
         st.session_state.pm_result = None
-        feature_with_context = f"{feature}\n\nProduct context:\n{context}" if context else feature
+        st.session_state.context_result = None
+
+        # Build context first if any provided
+        context_summary = ""
+        if any([ctx_users, ctx_product, ctx_constraints, ctx_failure, ctx_url, ctx_files]):
+            with st.status("Building context...", expanded=True) as status:
+                url_context = ""
+                if ctx_url:
+                    url_context = scrape_url(ctx_url)
+
+                file_context = ""
+                if ctx_files:
+                    for f in ctx_files:
+                        if f.name.endswith(".pdf"):
+                            file_context += f"\n\n--- {f.name} ---\n"
+                            file_context += extract_pdf_text(f)
+                        else:
+                            file_context += f"\n\n--- {f.name} ---\n"
+                            file_context += f.read().decode("utf-8")[:2000]
+
+                context_raw = cached_context_builder(
+                    ctx_users, ctx_product, ctx_constraints,
+                    ctx_failure, url_context, file_context
+                )
+                context_result = parse_agent_output(context_raw)
+                st.session_state.context_result = context_result
+                context_summary = context_result.get("context_summary", "")
+                status.update(label="Context built ✓", state="complete")
+
+        feature_with_context = f"{feature}\n\nProduct context:\n{context_summary}" if context_summary else feature
         st.session_state.feature = feature_with_context
+
+        with st.status("PM agent thinking...", expanded=True) as status:
+            pm_raw = cached_pm_agent(feature_with_context)
+            pm_result = parse_agent_output(pm_raw)
+            st.session_state.pm_raw = pm_raw
+            st.session_state.pm_result = pm_result
+            status.update(label="PM ✓", state="complete")
 
         with st.status("PM agent thinking...", expanded=True) as status:
             pm_raw = cached_pm_agent(feature_with_context)
@@ -177,6 +311,8 @@ with tab1:
             st.divider()
 
             md = f"# Feature Spec: {feature}\n\n"
+            if context:
+                md += f"## Product Context\n_{context}_\n\n"
             md += f"## User Story\n{pm_result.get('user_story', '')}\n\n"
             md += "## Scope\n"
             for item in pm_result.get('scope', []):

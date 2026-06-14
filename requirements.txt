@@ -2,3 +2,7 @@ anthropic
 python-dotenv
 python-docx
 streamlit
+requests
+beautifulsoup4
+pdfplumber
+
