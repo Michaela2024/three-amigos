@@ -3,3 +3,9 @@ venv/
 __pycache__/
 *.pyc
 .DS_Store
+node_modules/
+screenshots/
+demo_data/
+*.pptx
+*.pdf
+package-lock.json

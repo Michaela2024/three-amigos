@@ -12,6 +12,10 @@ import os
 import requests
 from bs4 import BeautifulSoup
 
+print(f"Current directory: {os.getcwd()}")
+print(f"demo_data exists: {os.path.exists('demo_data')}")
+print(f"demo_data absolute: {os.path.exists(os.path.join(os.path.dirname(__file__), 'demo_data'))}")
+
 spec_loader = importlib.util.spec_from_file_location(
     "main",
     os.path.join(os.path.dirname(__file__), "main.py")
@@ -20,7 +24,7 @@ main_module = importlib.util.module_from_spec(spec_loader)
 spec_loader.loader.exec_module(main_module)
 
 run_pm_agent = main_module.run_pm_agent
-run_context_builder=main_module.run_context_builder
+run_context_builder = main_module.run_context_builder
 run_engineer_agent = main_module.run_engineer_agent
 run_qa_agent = main_module.run_qa_agent
 run_synthesis_agent = main_module.run_synthesis_agent
@@ -28,19 +32,26 @@ run_assumption_map = main_module.run_assumption_map
 run_risk_log = main_module.run_risk_log
 parse_agent_output = main_module.parse_agent_output
 
-# ── Cached agent calls ──
-@st.cache_data(show_spinner=False)
-def cached_context_builder(users: str, product: str, constraints: str, 
-                            failure: str, url_context: str = "") -> str:
-    answers = {
-        "users": users,
-        "product": product,
-        "constraints": constraints,
-        "failure_condition": failure,
-        "url_context": url_context
-    }
-    return run_context_builder(answers)
+# ── Demo mode: load pre-saved data ──
+DEMO_MODE = os.path.exists("demo_data/pm.json")
 
+print(f"DEMO_MODE: {DEMO_MODE}")
+print(f"demo_data exists: {os.path.exists('demo_data')}")
+if DEMO_MODE:
+    with open("demo_data/pm.json") as f:
+        DEMO_PM = json.load(f)
+    with open("demo_data/eng.json") as f:
+        DEMO_ENG = json.load(f)
+    with open("demo_data/qa.json") as f:
+        DEMO_QA = json.load(f)
+    with open("demo_data/synthesis.json") as f:
+        DEMO_SYNTHESIS = json.load(f)
+    with open("demo_data/assumptions.json") as f:
+        DEMO_ASSUMPTIONS = json.load(f)
+    with open("demo_data/risks.json") as f:
+        DEMO_RISKS = json.load(f)
+
+# ── Cached agent calls ──
 @st.cache_data(show_spinner=False)
 def cached_pm_agent(feature: str) -> str:
     return run_pm_agent(feature)
@@ -66,8 +77,8 @@ def cached_risk_log(spec: str) -> str:
     return run_risk_log(spec)
 
 @st.cache_data(show_spinner=False)
-def cached_context_builder(users: str, product: str, constraints: str, 
-                            failure: str, url_context: str = "", 
+def cached_context_builder(users: str, product: str, constraints: str,
+                            failure: str, url_context: str = "",
                             file_context: str = "") -> str:
     answers = {
         "users": users,
@@ -84,7 +95,8 @@ st.set_page_config(
     page_icon="🤝",
     layout="wide"
 )
-
+st.write(f"Working directory: {os.getcwd()}")
+st.write(f"Demo mode: {DEMO_MODE}")
 # ── Header ──
 st.title("🤝 Three Amigos Spec Writer")
 st.caption("Stress-test your features before you build them.")
@@ -95,12 +107,9 @@ for you in seconds — surfacing conflicts, edge cases, and open questions befor
 a line of code is written.
 
 **How it works — follow the tabs in order:**
-1. **Generate Spec** — describe your feature and optionally add product context. 
-   Download the spec when done.
-2. **Review Spec** — upload the spec from Step 1 (edit it first if you like). 
-   Engineer and QA agents add inline comments. Download the annotated spec.
-3. **PM Artefacts** — upload the annotated spec from Step 2. 
-   Generate an assumption map and risk log ready to share with your team.
+1. **Generate Spec** — describe your feature and optionally add product context. Download the spec when done.
+2. **Review Spec** — upload the spec from Step 1 (edit it first if you like). Engineer and QA agents add inline comments. Download the annotated spec.
+3. **PM Artefacts** — upload the annotated spec from Step 2. Generate an assumption map and risk log ready to share with your team.
 
 **Works best when:**
 - Your feature brief is specific enough to build — not a vague goal or epic
@@ -113,14 +122,14 @@ st.divider()
 # ── Tabs ──
 tab1, tab2, tab3 = st.tabs(["Generate Spec", "Review Spec", "PM Artefacts"])
 
-# ── Helper: read uploaded file ──
+# ── Helpers ──
 def read_uploaded_file(uploaded_file) -> str:
     if uploaded_file.name.endswith(".docx"):
         doc = docx.Document(uploaded_file)
         return "\n".join([para.text for para in doc.paragraphs if para.text.strip()])
     else:
         return uploaded_file.read().decode("utf-8")
-    
+
 def scrape_url(url: str) -> str:
     try:
         response = requests.get(url, timeout=10)
@@ -128,9 +137,8 @@ def scrape_url(url: str) -> str:
         for tag in soup(["script", "style", "nav", "footer", "header"]):
             tag.decompose()
         text = soup.get_text(separator="\n", strip=True)
-        # Take first 2000 chars — enough for context, not enough to bloat the prompt
         return text[:2000]
-    except Exception as e:
+    except Exception:
         return ""
 
 def extract_pdf_text(uploaded_file) -> str:
@@ -138,14 +146,37 @@ def extract_pdf_text(uploaded_file) -> str:
         import pdfplumber
         with pdfplumber.open(uploaded_file) as pdf:
             text = "\n".join(
-                page.extract_text() for page in pdf.pages 
+                page.extract_text() for page in pdf.pages
                 if page.extract_text()
             )
         return text[:3000]
-    except Exception as e:
+    except Exception:
         return ""
-    
-# ── Helper: build assumption map markdown ──
+
+def build_spec_markdown(feature: str, spec: dict) -> str:
+    md = f"# Feature Spec: {feature}\n\n"
+    md += f"## User Story\n{spec.get('user_story', '')}\n\n"
+    md += "## Acceptance Criteria\n"
+    for ac in spec.get('acceptance_criteria', []):
+        md += f"**{ac['id']}** Given {ac['given']}, when {ac['when']}, then {ac['then']}\n\n"
+    md += "## Out of Scope\n"
+    for item in spec.get('out_of_scope', []):
+        md += f"- {item}\n"
+    md += "\n## Open Questions\n"
+    for q in spec.get('open_questions', []):
+        blocking = "🔴 BLOCKING" if q.get('blocking') else "🟡"
+        md += f"- {blocking} {q['question']} *(raised by: {q['raised_by']})*\n"
+    md += "\n## Risks\n"
+    for r in spec.get('risks', []):
+        md += f"- **{r['likelihood']}** — {r['risk']}\n"
+    md += "\n## Confidence Scores\n"
+    conf = spec.get('confidence', {})
+    md += f"- PM: {conf.get('pm')}/5\n"
+    md += f"- Engineer: {conf.get('engineer')}/5\n"
+    md += f"- QA: {conf.get('qa')}/5\n"
+    md += f"\n_{conf.get('notes', '')}_\n"
+    return md
+
 def build_assumption_markdown(result: dict) -> str:
     md = "# Assumption Map\n\n"
     md += f"**Top priority:** {result.get('top_priority', '')}\n\n"
@@ -155,7 +186,6 @@ def build_assumption_markdown(result: dict) -> str:
         md += f"| {a['assumption']} | {a['why_it_matters']} | {a['criticality']} | {a['evidence']} | {a['validation_method']} |\n"
     return md
 
-# ── Helper: build risk log markdown ──
 def build_risk_markdown(result: dict) -> str:
     md = "# Risk Log\n\n"
     md += f"**Top priority:** {result.get('top_priority', '')}\n\n"
@@ -183,94 +213,103 @@ with tab1:
     st.markdown("#### Product context (optional)")
     st.markdown("Answer a few questions to help the agents give more specific output.")
 
-with st.expander("Build product context", expanded=False):
-    ctx_users = st.text_input(
+    with st.expander("Build product context", expanded=False):
+        ctx_users = st.text_input(
             "1. Who are your primary users and what job are they trying to do?",
             placeholder="e.g. B2B project managers tracking team tasks across multiple clients",
             key="ctx_users"
         )
-    ctx_product = st.text_input(
+        ctx_product = st.text_input(
             "2. Briefly describe your product and its main features.",
             placeholder="e.g. Project management tool with task tracking, time logging and client reporting",
             key="ctx_product"
         )
-    ctx_constraints = st.text_input(
+        ctx_constraints = st.text_input(
             "3. What's your tech stack or any constraints I should know about?",
             placeholder="e.g. React frontend, Python/Django backend, AWS, small team of 4 engineers",
             key="ctx_constraints"
         )
-    ctx_failure = st.text_input(
+        ctx_failure = st.text_input(
             "4. What's the one thing that would make this feature a failure?",
             placeholder="e.g. If users don't discover it, or it slows down the core workflow",
             key="ctx_failure"
         )
-    ctx_url = st.text_input(
+        ctx_url = st.text_input(
             "5. Product URL (optional — we'll scrape it for additional context)",
             placeholder="e.g. https://yourproduct.com",
             key="ctx_url"
         )
-
-    ctx_files = st.file_uploader(
+        ctx_files = st.file_uploader(
             "6. Upload supporting files (optional — Figma exports as PDF, existing PRDs, research docs)",
             type=["pdf", "txt", "md"],
             accept_multiple_files=True,
             key="ctx_files"
         )
 
-    # Use context summary if available, otherwise empty
     context = st.session_state.get("context_result", {}).get("context_summary", "")
 
     assess_button = st.button("Generate Spec", type="primary",
-                              disabled=not feature, key="assess_btn")   
+                              disabled=not feature, key="assess_btn")
+
     if assess_button:
         st.cache_data.clear()
         st.session_state.pm_raw = None
         st.session_state.pm_result = None
         st.session_state.context_result = None
+        st.session_state.eng_result = None
+        st.session_state.qa_result = None
+        st.session_state.synthesis_result = None
+        st.session_state.assumption_result = None
+        st.session_state.risk_result = None
 
-        # Build context first if any provided
-        context_summary = ""
-        if any([ctx_users, ctx_product, ctx_constraints, ctx_failure, ctx_url, ctx_files]):
-            with st.status("Building context...", expanded=True) as status:
-                url_context = ""
-                if ctx_url:
-                    url_context = scrape_url(ctx_url)
+        # Demo mode — use pre-saved data instantly
+        if DEMO_MODE and ("linear" in feature.lower() or "time logging" in feature.lower()):
+            st.session_state.pm_result = DEMO_PM
+            st.session_state.pm_raw = json.dumps(DEMO_PM)
+            st.session_state.feature = feature
+            st.session_state.eng_result = DEMO_ENG
+            st.session_state.qa_result = DEMO_QA
+            st.session_state.synthesis_result = DEMO_SYNTHESIS
+            st.session_state.assumption_result = DEMO_ASSUMPTIONS
+            st.session_state.risk_result = DEMO_RISKS
 
-                file_context = ""
-                if ctx_files:
-                    for f in ctx_files:
-                        if f.name.endswith(".pdf"):
-                            file_context += f"\n\n--- {f.name} ---\n"
-                            file_context += extract_pdf_text(f)
-                        else:
-                            file_context += f"\n\n--- {f.name} ---\n"
-                            file_context += f.read().decode("utf-8")[:2000]
+        else:
+            # Normal mode — build context and run agents
+            context_summary = ""
+            if any([ctx_users, ctx_product, ctx_constraints, ctx_failure, ctx_url, ctx_files]):
+                with st.status("Building context...", expanded=True) as status:
+                    url_context = ""
+                    if ctx_url:
+                        url_context = scrape_url(ctx_url)
 
-                context_raw = cached_context_builder(
-                    ctx_users, ctx_product, ctx_constraints,
-                    ctx_failure, url_context, file_context
-                )
-                context_result = parse_agent_output(context_raw)
-                st.session_state.context_result = context_result
-                context_summary = context_result.get("context_summary", "")
-                status.update(label="Context built ✓", state="complete")
+                    file_context = ""
+                    if ctx_files:
+                        for f in ctx_files:
+                            if f.name.endswith(".pdf"):
+                                file_context += f"\n\n--- {f.name} ---\n"
+                                file_context += extract_pdf_text(f)
+                            else:
+                                file_context += f"\n\n--- {f.name} ---\n"
+                                file_context += f.read().decode("utf-8")[:2000]
 
-        feature_with_context = f"{feature}\n\nProduct context:\n{context_summary}" if context_summary else feature
-        st.session_state.feature = feature_with_context
+                    context_raw = cached_context_builder(
+                        ctx_users, ctx_product, ctx_constraints,
+                        ctx_failure, url_context, file_context
+                    )
+                    context_result = parse_agent_output(context_raw)
+                    st.session_state.context_result = context_result
+                    context_summary = context_result.get("context_summary", "")
+                    status.update(label="Context built ✓", state="complete")
 
-        with st.status("PM agent thinking...", expanded=True) as status:
-            pm_raw = cached_pm_agent(feature_with_context)
-            pm_result = parse_agent_output(pm_raw)
-            st.session_state.pm_raw = pm_raw
-            st.session_state.pm_result = pm_result
-            status.update(label="PM ✓", state="complete")
+            feature_with_context = f"{feature}\n\nProduct context:\n{context_summary}" if context_summary else feature
+            st.session_state.feature = feature_with_context
 
-        with st.status("PM agent thinking...", expanded=True) as status:
-            pm_raw = cached_pm_agent(feature_with_context)
-            pm_result = parse_agent_output(pm_raw)
-            st.session_state.pm_raw = pm_raw
-            st.session_state.pm_result = pm_result
-            status.update(label="PM ✓", state="complete")
+            with st.status("PM agent thinking...", expanded=True) as status:
+                pm_raw = cached_pm_agent(feature_with_context)
+                pm_result = parse_agent_output(pm_raw)
+                st.session_state.pm_raw = pm_raw
+                st.session_state.pm_result = pm_result
+                status.update(label="PM ✓", state="complete")
 
     if st.session_state.get("pm_result"):
         pm_result = st.session_state.pm_result
@@ -308,36 +347,56 @@ with st.expander("Build product context", expanded=False):
                     for q in pm_result["questions"]:
                         st.markdown(f"- {q}")
 
-            st.divider()
+            # Show Engineer and QA if available
+            if st.session_state.get("eng_result"):
+                with st.expander("Engineer output", expanded=False):
+                    st.json(st.session_state.eng_result)
 
-            md = f"# Feature Spec: {feature}\n\n"
-            if context:
-                md += f"## Product Context\n_{context}_\n\n"
-            md += f"## User Story\n{pm_result.get('user_story', '')}\n\n"
-            md += "## Scope\n"
-            for item in pm_result.get('scope', []):
-                md += f"- {item}\n"
-            md += "\n## Out of Scope\n"
-            for item in pm_result.get('out_of_scope', []):
-                md += f"- {item}\n"
-            md += "\n## Success Metrics\n"
-            for item in pm_result.get('success_metrics', []):
-                md += f"- {item}\n"
-            md += "\n## Assumptions to Test\n"
-            for item in pm_result.get('assumptions', []):
-                md += f"- {item}\n"
-            md += f"\n## Simpler Version\n{pm_result.get('simpler_version', '')}\n\n"
-            md += "## Open Questions\n"
-            for item in pm_result.get('questions', []):
-                md += f"- {item}\n"
+            if st.session_state.get("qa_result"):
+                with st.expander("QA output", expanded=False):
+                    st.json(st.session_state.qa_result)
 
-            st.download_button(
-                label="⬇️ Download spec as markdown",
-                data=md,
-                file_name="spec.md",
-                mime="text/markdown",
-                key="download_spec"
-            )
+            # Show synthesis if available
+            if st.session_state.get("synthesis_result"):
+                st.divider()
+                st.subheader("Final Spec")
+                st.json(st.session_state.synthesis_result)
+                md = build_spec_markdown(feature, st.session_state.synthesis_result)
+                st.download_button(
+                    label="⬇️ Download spec as markdown",
+                    data=md,
+                    file_name="spec.md",
+                    mime="text/markdown",
+                    key="download_spec"
+                )
+            else:
+                st.divider()
+                md = f"# Feature Spec: {feature}\n\n"
+                md += f"## User Story\n{pm_result.get('user_story', '')}\n\n"
+                md += "## Scope\n"
+                for item in pm_result.get('scope', []):
+                    md += f"- {item}\n"
+                md += "\n## Out of Scope\n"
+                for item in pm_result.get('out_of_scope', []):
+                    md += f"- {item}\n"
+                md += "\n## Success Metrics\n"
+                for item in pm_result.get('success_metrics', []):
+                    md += f"- {item}\n"
+                md += "\n## Assumptions to Test\n"
+                for item in pm_result.get('assumptions', []):
+                    md += f"- {item}\n"
+                md += f"\n## Simpler Version\n{pm_result.get('simpler_version', '')}\n\n"
+                md += "## Open Questions\n"
+                for item in pm_result.get('questions', []):
+                    md += f"- {item}\n"
+
+                st.download_button(
+                    label="⬇️ Download spec as markdown",
+                    data=md,
+                    file_name="spec.md",
+                    mime="text/markdown",
+                    key="download_spec"
+                )
 
 # ══════════════════════════════════════════
 # TAB 2: REVIEW SPEC
