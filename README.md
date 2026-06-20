@@ -44,6 +44,21 @@ Upload the reviewed spec. Generate an assumption map, a risk log, or both. Downl
 
 Linear is a fast, keyboard-driven issue tracker that deliberately avoids feature bloat. Time tracking is a feature their users frequently request — and Linear has consistently declined to build it. It's a genuinely controversial product decision that produces interesting agent tension.
 
+## Demo
+
+The walkthrough below shows the full pipeline running on the Linear example — from feature brief to assumption map and risk log.
+
+![Title](docs/slide-01.png)
+![The problem](docs/slide-02.png)
+![The tool](docs/slide-03.png)
+![Step 1 — feature entered](docs/slide-04.png)
+![Step 1 — context added](docs/slide-05.png)
+![PM agent output](docs/slide-06.png)
+![Engineer and QA review](docs/slide-07.png)
+![Assumption map](docs/slide-08.png)
+![Risk log](docs/slide-09.png)
+![Try it yourself](docs/slide-10.png)
+
 **Feature brief:**
 ```
 Add a manual time logging field to individual issues so engineers can record hours spent
