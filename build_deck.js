@@ -39,7 +39,7 @@ pres.layout = "LAYOUT_16x9";
   s.addShape("ellipse", { x: 6.5, y: -1.5, w: 6, h: 6, fill: { color: C.mid, transparency: 70 } });
   s.addText("PORTFOLIO PROJECT", { x: 0.6, y: 0.9, w: 4, h: 0.25, fontSize: 9, bold: true, color: C.ice, charSpacing: 4, margin: 0 });
   s.addText("Three Amigos\nSpec Writer", { x: 0.6, y: 1.3, w: 7, h: 2.0, fontSize: 44, bold: true, color: C.white, fontFace: "Calibri" });
-  s.addText("Stress-test your features before you build them.\nThree AI agents. One honest spec.", { x: 0.6, y: 3.35, w: 7, h: 0.9, fontSize: 15, color: C.ice });
+  s.addText("Stress-test your features before you build them.", { x: 0.6, y: 3.35, w: 7, h: 0.9, fontSize: 15, color: C.ice });
   const agents = [
     { label: "PM", desc: "Scope & value", color: C.mid },
     { label: "Engineer", desc: "Feasibility & risks", color: "1B5E20" },
